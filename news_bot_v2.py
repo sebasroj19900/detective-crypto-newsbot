@@ -145,10 +145,22 @@ def send_telegram(text: str, parse_mode: str = "HTML"):
             "chat_id": TELEGRAM_CHAT_ID,
             "text": text,
             "parse_mode": parse_mode,
-            "disable_web_page_preview": True
+            "disable_web_page_preview": False
         }, timeout=15)
         if r.status_code == 200:
             log.info("✅ Mensaje enviado a Telegram")
+        elif r.status_code == 400:
+            # Si HTML falla, reenviar sin formato
+            log.warning(f"HTML parse error, reintentando sin formato: {r.text[:100]}")
+            r2 = requests.post(url, json={
+                "chat_id": TELEGRAM_CHAT_ID,
+                "text": re.sub(r'<[^>]+>', '', text),  # quitar tags HTML
+                "disable_web_page_preview": False
+            }, timeout=15)
+            if r2.status_code == 200:
+                log.info("✅ Mensaje enviado (sin formato)")
+            else:
+                log.error(f"Telegram error {r2.status_code}: {r2.text[:200]}")
         else:
             log.error(f"Telegram error {r.status_code}: {r.text[:200]}")
     except Exception as e:
@@ -562,21 +574,27 @@ def parse_rss(feed_url: str, source: str) -> list:
 def check_news_events() -> list:
     global cache
     alerts = []
+    seen_titles_this_cycle = set()  # deduplicar entre feeds en el mismo ciclo
 
     for source, url in RSS_FEEDS:
         for article in parse_rss(url, source):
             guid  = article["guid"]
             title = article["title"]
+            title_key = title[:60].lower().strip()  # clave corta para dedup por título
 
             if guid in cache["seen_news"]:
+                continue
+            if title_key in seen_titles_this_cycle:
                 continue
 
             event_type = classify_event(title)
             if not event_type or not is_high_impact(event_type):
+                cache["seen_news"].append(guid)  # marcar como visto aunque no sea de alto impacto
                 continue
 
             symbol = extract_token_symbol(title)
             cache["seen_news"].append(guid)
+            seen_titles_this_cycle.add(title_key)
 
             alerts.append({
                 "symbol":     symbol,
