@@ -44,6 +44,10 @@ TELEGRAM_CHAT_ID    = os.getenv("TELEGRAM_CHAT_ID", "")
 COINGECKO_API_KEY   = os.getenv("COINGECKO_API_KEY", "")   # opcional, mejora rate limits
 CRYPTOPANIC_API_KEY = os.getenv("CRYPTOPANIC_API_KEY", "")  # opcional
 
+# Diagnóstico de variables de entorno al inicio
+print(f"[DIAG] TELEGRAM_BOT_TOKEN: {'SET (' + TELEGRAM_BOT_TOKEN[:10] + '...)' if TELEGRAM_BOT_TOKEN else 'NO SET ❌'}")
+print(f"[DIAG] TELEGRAM_CHAT_ID:   {'SET (' + TELEGRAM_CHAT_ID + ')' if TELEGRAM_CHAT_ID else 'NO SET ❌'}")
+
 POLL_INTERVAL       = 600    # cada 10 minutos
 CACHE_FILE          = Path(__file__).parent / "cache_v2.json"
 
