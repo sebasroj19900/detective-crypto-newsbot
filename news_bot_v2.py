@@ -186,24 +186,75 @@ def is_high_impact(event_type: str) -> bool:
 
 def extract_token_symbol(title: str) -> str:
     """Extrae el símbolo del token del título de la noticia."""
-    # Buscar patrones como $TOKEN, (TOKEN), "TOKEN token", etc.
+
+    # ── 1. Mapa de nombres completos → símbolo ──
+    NAME_MAP = {
+        "bitcoin": "BTC", "ethereum": "ETH", "solana": "SOL",
+        "binance coin": "BNB", "bnb": "BNB", "ripple": "XRP", "xrp": "XRP",
+        "cardano": "ADA", "dogecoin": "DOGE", "shiba inu": "SHIB",
+        "avalanche": "AVAX", "chainlink": "LINK", "polkadot": "DOT",
+        "uniswap": "UNI", "litecoin": "LTC", "tron": "TRX",
+        "stellar": "XLM", "monero": "XMR", "cosmos": "ATOM",
+        "near protocol": "NEAR", "near": "NEAR",
+        "aptos": "APT", "sui": "SUI", "arbitrum": "ARB",
+        "optimism": "OP", "polygon": "POL", "matic": "POL",
+        "injective": "INJ", "render": "RENDER", "ondo": "ONDO",
+        "aave": "AAVE", "compound": "COMP", "maker": "MKR",
+        "curve": "CRV", "synthetix": "SNX", "yearn": "YFI",
+        "the graph": "GRT", "filecoin": "FIL", "theta": "THETA",
+        "internet computer": "ICP", "icp": "ICP",
+        "hedera": "HBAR", "hbar": "HBAR",
+        "pepe": "PEPE", "bonk": "BONK", "wif": "WIF",
+        "floki": "FLOKI", "brett": "BRETT",
+        "worldcoin": "WLD", "wld": "WLD",
+        "sei": "SEI", "mantle": "MNT", "blast": "BLAST",
+        "jupiter": "JUP", "jito": "JTO", "pyth": "PYTH",
+        "wormhole": "W", "starknet": "STRK",
+        "morpho": "MORPHO", "pendle": "PENDLE",
+        "ethena": "ENA", "kelp": "KELP",
+        "hyperliquid": "HYPE", "virtuals": "VIRTUAL",
+        "bio protocol": "BIO", "bio": "BIO",
+        "knc": "KNC", "kyber": "KNC",
+        "amp": "AMP", "rez": "REZ",
+    }
+
+    title_lower = title.lower()
+
+    # ── 2. Buscar por nombre completo en el título ──
+    for name, symbol in NAME_MAP.items():
+        if re.search(r'\b' + re.escape(name) + r'\b', title_lower):
+            return symbol
+
+    # ── 3. Patrones de símbolo explícito ──
+    NOISE = {
+        "USD", "USDT", "USDC", "NFT", "DAO", "TVL", "CEO", "SEC",
+        "ETF", "API", "USA", "FOR", "NOT", "THE", "DeFi", "DEX",
+        "CEX", "ALL", "NEW", "TOP", "CAN", "HIT", "NOW", "GET",
+        "BIG", "KEY", "LAW", "TAX", "HOW", "WHY", "IRS", "UK",
+        "EU", "AI", "DeFi", "WEB", "NFTs", "DAO", "IPO", "ICO",
+        "P2P", "KYC", "AML", "TGE", "IDO", "IEO", "RPC", "EVM",
+    }
+
     patterns = [
-        r'\$([A-Z]{2,10})\b',          # $TOKEN
-        r'\b([A-Z]{2,8}) token\b',      # TOKEN token
-        r'\b([A-Z]{2,8}) coin\b',       # TOKEN coin
-        r'\(([A-Z]{2,8})\)',            # (TOKEN)
-        r'\b([A-Z]{2,8}) lists?\b',     # TOKEN lists
-        r'\blists? ([A-Z]{2,8})\b',     # lists TOKEN
+        r'\$([A-Z]{2,10})\b',                          # $TOKEN
+        r'\b([A-Z]{2,8})\s+token\b',                   # TOKEN token
+        r'\b([A-Z]{2,8})\s+coin\b',                    # TOKEN coin
+        r'\(([A-Z]{2,8})\)',                            # (TOKEN)
+        r'\blists?\s+([A-Z]{2,8})\b',                  # lists TOKEN
+        r'\b([A-Z]{2,8})\s+(?:lists?|spot|trading)\b', # TOKEN lists/spot
+        r'\b([A-Z]{2,8})\s+(?:hack|exploit|stolen)\b', # TOKEN hack
+        r'\b([A-Z]{2,8})\s+(?:airdrop|burn|unlock)\b', # TOKEN airdrop/burn/unlock
+        r'\b([A-Z]{2,8})\s+(?:etf|filing)\b',          # TOKEN etf
+        r'\badds?\s+([A-Z]{2,8})\b',                   # adds TOKEN
     ]
+
     for pattern in patterns:
         match = re.search(pattern, title, re.IGNORECASE)
         if match:
             symbol = match.group(1).upper()
-            # Filtrar palabras comunes que no son tokens
-            exclude = {"USD", "ETH", "BTC", "NFT", "DeFi", "DAO", "TVL",
-                      "CEO", "SEC", "ETF", "API", "USA", "FOR", "NOT", "THE"}
-            if symbol not in exclude:
+            if symbol not in NOISE and len(symbol) >= 2:
                 return symbol
+
     return ""
 
 # ─────────────────────────────────────────────
