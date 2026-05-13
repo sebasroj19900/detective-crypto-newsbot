@@ -133,6 +133,27 @@ def save_cache(cache: dict):
 cache = load_cache()
 
 # ─────────────────────────────────────────────
+#  TRADUCCIÓN
+# ─────────────────────────────────────────────
+def translate_to_spanish(text: str) -> str:
+    """Traduce texto al español usando Google Translate (sin API key)."""
+    try:
+        url = "https://translate.googleapis.com/translate_a/single"
+        params = {
+            "client": "gtx",
+            "sl": "en",
+            "tl": "es",
+            "dt": "t",
+            "q": text
+        }
+        r = requests.get(url, params=params, timeout=8)
+        result = r.json()
+        translated = "".join([chunk[0] for chunk in result[0] if chunk[0]])
+        return translated if translated else text
+    except Exception:
+        return text  # Si falla, devuelve el original
+
+# ─────────────────────────────────────────────
 #  TELEGRAM
 # ─────────────────────────────────────────────
 def send_telegram(text: str, parse_mode: str = "HTML"):
@@ -647,10 +668,12 @@ def check_news_events() -> list:
             cache["seen_news"].append(guid)
             seen_titles_this_cycle.add(title_key)
 
+            title_es = translate_to_spanish(title)
             alerts.append({
                 "symbol":     symbol,
                 "event_type": event_type,
-                "title":      title,
+                "title":      title_es,
+                "title_orig": title,
                 "link":       article["link"],
                 "source":     source,
             })
