@@ -27,13 +27,12 @@ import os
 import json
 import time
 import re
-import asyncio
 import requests
 import logging
+import feedparser
 from datetime import datetime, timezone
 from pathlib import Path
 from dotenv import load_dotenv
-import xml.etree.ElementTree as ET
 
 load_dotenv()
 
@@ -49,12 +48,16 @@ CRYPTOPANIC_API_KEY = os.getenv("CRYPTOPANIC_API_KEY", "")
 TELEGRAM_API_ID     = int(os.getenv("TELEGRAM_API_ID", "0"))
 TELEGRAM_API_HASH   = os.getenv("TELEGRAM_API_HASH", "")
 TELEGRAM_SESSION    = os.getenv("TELEGRAM_SESSION", "")
+CLAUDE_API_KEY      = os.getenv("CLAUDE_API_KEY", "")
 
 # Canales de Telegram a monitorear
 TELEGRAM_CHANNELS = [
     "WatcherGuru",    # Breaking news crypto
     "whale_alert",    # Movimientos de ballenas
 ]
+
+# Cliente Telethon global (conexión persistente)
+telethon_client = None
 
 POLL_INTERVAL       = 600    # cada 10 minutos
 CACHE_FILE          = Path(__file__).parent / "cache_v2.json"
@@ -658,46 +661,27 @@ def check_new_listings() -> list:
 #  MONITOR DE NOTICIAS (RSS)
 # ─────────────────────────────────────────────
 
-def parse_pubdate(date_str: str):
-    """Parsea la fecha de publicación del RSS."""
-    if not date_str:
-        return None
-    formats = [
-        "%a, %d %b %Y %H:%M:%S %z",
-        "%a, %d %b %Y %H:%M:%S GMT",
-        "%Y-%m-%dT%H:%M:%S%z",
-        "%Y-%m-%dT%H:%M:%SZ",
-    ]
-    for fmt in formats:
-        try:
-            return datetime.strptime(date_str.strip(), fmt)
-        except Exception:
-            continue
-    return None
-
 def parse_rss(feed_url: str, source: str, max_age_hours: int = 12) -> list:
+    """Parsea feed RSS usando feedparser — más robusto que XML manual."""
     articles = []
     try:
-        r = requests.get(feed_url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
-        root = ET.fromstring(r.content)
-        ch = root.find("channel")
-        if ch is None:
-            return []
-        now = datetime.now().astimezone()
-        for item in (ch.findall("item") or root.findall(".//item"))[:20]:
-            title    = (item.findtext("title")   or "").strip()
-            link     = (item.findtext("link")    or "").strip()
-            guid     = (item.findtext("guid")    or link).strip()
-            pub_date = item.findtext("pubDate") or item.findtext("{http://www.w3.org/2005/Atom}updated") or ""
+        feed = feedparser.parse(feed_url)
+        now = datetime.now(timezone.utc)
+
+        for entry in feed.entries[:20]:
+            title = (entry.get("title") or "").strip()
+            link  = (entry.get("link")  or "").strip()
+            guid  = (entry.get("id")    or link).strip()
 
             if not title:
                 continue
 
-            # Filtrar noticias antiguas para evitar duplicados tras reinicios
-            parsed_date = parse_pubdate(pub_date)
-            if parsed_date:
+            # Filtrar por antigüedad
+            published = entry.get("published_parsed") or entry.get("updated_parsed")
+            if published:
                 try:
-                    age_hours = (now - parsed_date).total_seconds() / 3600
+                    pub_dt = datetime(*published[:6], tzinfo=timezone.utc)
+                    age_hours = (now - pub_dt).total_seconds() / 3600
                     if age_hours > max_age_hours:
                         continue
                 except Exception:
@@ -750,24 +734,38 @@ def check_news_events() -> list:
 #  MONITOR DE CANALES TELEGRAM
 # ─────────────────────────────────────────────
 
+def init_telethon():
+    """Inicia conexión persistente con Telegram (una sola vez al arrancar)."""
+    global telethon_client
+    if not TELEGRAM_API_ID or not TELEGRAM_API_HASH or not TELEGRAM_SESSION:
+        log.warning("⚠️ Telethon: credenciales no configuradas")
+        return
+    try:
+        from telethon.sync import TelegramClient
+        from telethon.sessions import StringSession
+        telethon_client = TelegramClient(StringSession(TELEGRAM_SESSION), TELEGRAM_API_ID, TELEGRAM_API_HASH)
+        telethon_client.connect()
+        if telethon_client.is_user_authorized():
+            log.info("📡 Telethon conectado permanentemente ✅")
+        else:
+            log.error("❌ Telethon: sesión no autorizada")
+            telethon_client = None
+    except Exception as e:
+        log.error(f"❌ Error iniciando Telethon: {e}")
+        telethon_client = None
+
 def check_telegram_channels() -> list:
     """Lee los últimos mensajes de WatcherGuru y whale_alert."""
-    if not TELEGRAM_API_ID or not TELEGRAM_API_HASH or not TELEGRAM_SESSION:
-        log.warning("⚠️ Telethon: credenciales no configuradas (API_ID/API_HASH/SESSION)")
+    global telethon_client
+    if not telethon_client:
         return []
 
     alerts = []
     try:
-        from telethon.sync import TelegramClient
-        from telethon.sessions import StringSession
-
-        log.info("📡 Conectando a canales Telegram...")
-        with TelegramClient(StringSession(TELEGRAM_SESSION), TELEGRAM_API_ID, TELEGRAM_API_HASH) as client:
-            log.info("📡 Conexión Telethon OK")
-            for channel in TELEGRAM_CHANNELS:
-                try:
-                    messages = client.get_messages(channel, limit=15)
-                    log.info(f"📡 Canal @{channel}: {len(messages)} mensajes obtenidos")
+        for channel in TELEGRAM_CHANNELS:
+            try:
+                messages = telethon_client.get_messages(channel, limit=15)
+                log.info(f"📡 Canal @{channel}: {len(messages)} mensajes obtenidos")
                     for msg in messages:
                         if not msg.text:
                             continue
@@ -806,10 +804,10 @@ def check_telegram_channels() -> list:
                         })
                 except Exception as e:
                     log.warning(f"Error leyendo canal {channel}: {e}")
-    except ImportError:
-        log.error("❌ Telethon no instalado — verifica requirements.txt")
     except Exception as e:
-        log.error(f"❌ Error Telethon: {type(e).__name__}: {e}")
+        log.error(f"❌ Error Telethon en ciclo: {type(e).__name__}: {e}")
+        # Reconectar si la conexión se perdió
+        init_telethon()
 
     return alerts
 
@@ -817,9 +815,48 @@ def check_telegram_channels() -> list:
 #  LOOP PRINCIPAL
 # ─────────────────────────────────────────────
 
+def analyze_with_claude(title: str, event_type: str, market_data: dict) -> str:
+    """Usa Claude para analizar el impacto real de la noticia."""
+    if not CLAUDE_API_KEY:
+        return ""
+    try:
+        price = market_data.get("price", 0)
+        mcap  = market_data.get("market_cap", 0)
+        chg24 = market_data.get("change_24h", 0)
+
+        prompt = f"""Eres un analista experto en criptomonedas. Analiza esta noticia en máximo 2 oraciones en español.
+Noticia: {title}
+Tipo de evento: {event_type}
+Precio actual: ${price:,.4f} | Cambio 24h: {chg24:+.1f}% | Market cap: ${mcap/1e6:.0f}M
+
+Responde SOLO con: 1) Si es alcista o bajista para el precio. 2) Qué acción concreta tomarías (comprar, vender, esperar, investigar más). Sin preámbulos."""
+
+        r = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key": CLAUDE_API_KEY,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json"
+            },
+            json={
+                "model": "claude-haiku-4-5-20251001",
+                "max_tokens": 150,
+                "messages": [{"role": "user", "content": prompt}]
+            },
+            timeout=15
+        )
+        if r.status_code == 200:
+            return r.json()["content"][0]["text"].strip()
+    except Exception as e:
+        log.debug(f"Claude API: {e}")
+    return ""
+
 def main():
     log.info("🚀 Detective Crypto V2 — Bot de Investigación iniciado")
     log.info(f"   Revisión cada {POLL_INTERVAL // 60} minutos | 24/7")
+
+    # Iniciar conexión persistente con Telegram
+    init_telethon()
 
     send_telegram(
         "🤖 <b>Detective Crypto V2 — Activo</b>\n\n"
@@ -879,6 +916,12 @@ def main():
 
             if symbol:
                 report = investigate_token(symbol, event_type, title, link)
+                # Agregar análisis de Claude al reporte
+                if CLAUDE_API_KEY:
+                    cg_data = get_coingecko_data(symbol) or {}
+                    claude_opinion = analyze_with_claude(title, event_type, cg_data)
+                    if claude_opinion:
+                        report += f"\n\n🤖 <b>Análisis IA:</b>\n{claude_opinion}"
             else:
                 # Sin símbolo — enviar alerta básica
                 impact = HISTORICAL_IMPACT.get(event_type, {})
