@@ -625,7 +625,24 @@ def check_new_listings() -> list:
 #  MONITOR DE NOTICIAS (RSS)
 # ─────────────────────────────────────────────
 
-def parse_rss(feed_url: str, source: str) -> list:
+def parse_pubdate(date_str: str):
+    """Parsea la fecha de publicación del RSS."""
+    if not date_str:
+        return None
+    formats = [
+        "%a, %d %b %Y %H:%M:%S %z",
+        "%a, %d %b %Y %H:%M:%S GMT",
+        "%Y-%m-%dT%H:%M:%S%z",
+        "%Y-%m-%dT%H:%M:%SZ",
+    ]
+    for fmt in formats:
+        try:
+            return datetime.strptime(date_str.strip(), fmt)
+        except Exception:
+            continue
+    return None
+
+def parse_rss(feed_url: str, source: str, max_age_hours: int = 12) -> list:
     articles = []
     try:
         r = requests.get(feed_url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
@@ -633,12 +650,27 @@ def parse_rss(feed_url: str, source: str) -> list:
         ch = root.find("channel")
         if ch is None:
             return []
+        now = datetime.now().astimezone()
         for item in (ch.findall("item") or root.findall(".//item"))[:20]:
-            title = (item.findtext("title") or "").strip()
-            link  = (item.findtext("link")  or "").strip()
-            guid  = (item.findtext("guid")  or link).strip()
-            if title:
-                articles.append({"title": title, "link": link, "guid": guid, "source": source})
+            title    = (item.findtext("title")   or "").strip()
+            link     = (item.findtext("link")    or "").strip()
+            guid     = (item.findtext("guid")    or link).strip()
+            pub_date = item.findtext("pubDate") or item.findtext("{http://www.w3.org/2005/Atom}updated") or ""
+
+            if not title:
+                continue
+
+            # Filtrar noticias antiguas para evitar duplicados tras reinicios
+            parsed_date = parse_pubdate(pub_date)
+            if parsed_date:
+                try:
+                    age_hours = (now - parsed_date).total_seconds() / 3600
+                    if age_hours > max_age_hours:
+                        continue
+                except Exception:
+                    pass
+
+            articles.append({"title": title, "link": link, "guid": guid, "source": source})
     except Exception as e:
         log.debug(f"RSS {source}: {e}")
     return articles
