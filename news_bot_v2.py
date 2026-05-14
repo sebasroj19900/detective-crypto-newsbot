@@ -766,42 +766,42 @@ def check_telegram_channels() -> list:
             try:
                 messages = telethon_client.get_messages(channel, limit=15)
                 log.info(f"📡 Canal @{channel}: {len(messages)} mensajes obtenidos")
-                    for msg in messages:
-                        if not msg.text:
-                            continue
+                for msg in messages:
+                    if not msg.text:
+                        continue
 
-                        text = msg.text.strip()
-                        msg_id = f"tg_{channel}_{msg.id}"
+                    text = msg.text.strip()
+                    msg_id = f"tg_{channel}_{msg.id}"
 
-                        if msg_id in cache["seen_news"]:
-                            continue
+                    if msg_id in cache["seen_news"]:
+                        continue
 
-                        # Filtrar mensajes de más de 12 horas
-                        msg_time = msg.date.replace(tzinfo=timezone.utc)
-                        age_hours = (datetime.now(timezone.utc) - msg_time).total_seconds() / 3600
-                        if age_hours > 12:
-                            cache["seen_news"].append(msg_id)
-                            continue
-
-                        # Clasificar el mensaje
-                        event_type = classify_event(text)
-                        if not event_type or not is_high_impact(event_type):
-                            cache["seen_news"].append(msg_id)
-                            continue
-
-                        symbol = extract_token_symbol(text)
-                        title_es = translate_to_spanish(text[:200])
+                    # Filtrar mensajes de más de 12 horas
+                    msg_time = msg.date.replace(tzinfo=timezone.utc)
+                    age_hours = (datetime.now(timezone.utc) - msg_time).total_seconds() / 3600
+                    if age_hours > 12:
                         cache["seen_news"].append(msg_id)
+                        continue
 
-                        log.info(f"📡 Canal [{channel}] [{event_type}]: {text[:70]}…")
-                        alerts.append({
-                            "symbol":     symbol,
-                            "event_type": event_type,
-                            "title":      title_es,
-                            "title_orig": text[:200],
-                            "link":       f"https://t.me/{channel}",
-                            "source":     f"Telegram @{channel}",
-                        })
+                    # Clasificar el mensaje
+                    event_type = classify_event(text)
+                    if not event_type or not is_high_impact(event_type):
+                        cache["seen_news"].append(msg_id)
+                        continue
+
+                    symbol = extract_token_symbol(text)
+                    title_es = translate_to_spanish(text[:200])
+                    cache["seen_news"].append(msg_id)
+
+                    log.info(f"📡 Canal [{channel}] [{event_type}]: {text[:70]}…")
+                    alerts.append({
+                        "symbol":     symbol,
+                        "event_type": event_type,
+                        "title":      title_es,
+                        "title_orig": text[:200],
+                        "link":       f"https://t.me/{channel}",
+                        "source":     f"Telegram @{channel}",
+                    })
                 except Exception as e:
                     log.warning(f"Error leyendo canal {channel}: {e}")
     except Exception as e:
