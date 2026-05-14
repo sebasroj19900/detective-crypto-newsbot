@@ -802,8 +802,8 @@ def check_telegram_channels() -> list:
                         "link":       f"https://t.me/{channel}",
                         "source":     f"Telegram @{channel}",
                     })
-                except Exception as e:
-                    log.warning(f"Error leyendo canal {channel}: {e}")
+            except Exception as e:
+                log.warning(f"Error leyendo canal {channel}: {e}")
     except Exception as e:
         log.error(f"❌ Error Telethon en ciclo: {type(e).__name__}: {e}")
         # Reconectar si la conexión se perdió
