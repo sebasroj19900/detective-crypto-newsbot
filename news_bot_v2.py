@@ -90,24 +90,39 @@ HISTORICAL_IMPACT = {
     "hack":               {"emoji": "☠️", "rango": "-40% a -80%", "ventana": "inmediato","tipo": "MUY BAJISTA"},
     "delisting":          {"emoji": "❌", "rango": "-20% a -40%", "ventana": "inmediato","tipo": "BAJISTA"},
     "partnership":        {"emoji": "🤝", "rango": "+15% a +35%", "ventana": "48h",    "tipo": "ALCISTA"},
+    "regulation":         {"emoji": "⚖️", "rango": "-20% a -50%", "ventana": "inmediato","tipo": "MUY BAJISTA"},
 }
 
 # Palabras clave para clasificar noticias por tipo
 EVENT_KEYWORDS = {
-    "binance_listing":    ["lists on binance", "binance lists", "listed on binance", "now trading on binance", "binance spot"],
-    "coinbase_listing":   ["lists on coinbase", "coinbase lists", "listed on coinbase", "coinbase adds", "now on coinbase"],
-    "okx_listing":        ["lists on okx", "okx lists", "listed on okx", "okx adds"],
-    "bybit_listing":      ["lists on bybit", "bybit lists", "listed on bybit", "bybit adds"],
-    "exchange_listing":   ["listed on", "lists on", "now trading on", "spot trading", "trading pair"],
-    "strategic_alliance": ["strategic partnership", "strategic alliance", "partners with", "collaboration with", "integrates with"],
-    "etf_filing":         ["etf filing", "etf application", "files for etf", "spot etf", "etf submitted"],
-    "etf_approval":       ["etf approved", "etf approval", "sec approves etf", "etf greenlit"],
-    "airdrop":            ["airdrop", "token airdrop", "claim airdrop", "free tokens"],
-    "token_burn":         ["token burn", "burn event", "tokens burned", "burning tokens", "deflationary burn"],
-    "token_unlock":       ["token unlock", "vesting unlock", "tokens unlocked", "cliff unlock", "tokens released"],
-    "hack":               ["hacked", "exploited", "hack", "exploit", "stolen", "rug pull", "breach", "attack"],
-    "delisting":          ["delisted", "delisting", "removed from"],
-    "partnership":        ["partnership", "partners with", "integrates", "collaboration", "joins forces"],
+    "binance_listing":    ["lists on binance", "binance lists", "listed on binance", "now trading on binance",
+                           "binance spot", "binance will list", "launching on binance", "binance perpetual"],
+    "coinbase_listing":   ["lists on coinbase", "coinbase lists", "listed on coinbase", "coinbase adds",
+                           "now on coinbase", "coinbase will list", "launching on coinbase", "coinbase advanced"],
+    "okx_listing":        ["lists on okx", "okx lists", "listed on okx", "okx adds", "okx will list"],
+    "bybit_listing":      ["lists on bybit", "bybit lists", "listed on bybit", "bybit adds", "bybit will list"],
+    "exchange_listing":   ["listed on", "lists on", "now trading on", "spot trading", "new listing",
+                           "launches on", "available on", "trading live"],
+    "strategic_alliance": ["strategic partnership", "strategic alliance", "partners with", "collaboration with",
+                           "integrates with", "joins forces with", "teams up with", "deal with", "agreement with"],
+    "etf_filing":         ["etf filing", "etf application", "files for etf", "spot etf", "etf submitted",
+                           "etf proposal", "etf request", "bitcoin etf", "ethereum etf", "crypto etf",
+                           "yanked", "inflows", "outflows", "etf flows", "etf fund"],
+    "etf_approval":       ["etf approved", "etf approval", "sec approves etf", "etf greenlit", "sec greenlights"],
+    "airdrop":            ["airdrop", "token airdrop", "claim airdrop", "free tokens", "snapshot",
+                           "eligible for", "token distribution", "community rewards"],
+    "token_burn":         ["token burn", "burn event", "tokens burned", "burning tokens", "deflationary burn",
+                           "buyback and burn", "supply reduction", "burn mechanism"],
+    "token_unlock":       ["token unlock", "vesting unlock", "tokens unlocked", "cliff unlock", "tokens released",
+                           "vesting schedule", "unlock event", "tokens vested"],
+    "hack":               ["hacked", "exploited", "hack", "exploit", "stolen", "rug pull", "breach", "attack",
+                           "drained", "vulnerability", "security incident", "funds stolen", "million stolen",
+                           "billion stolen", "flash loan", "phishing", "scam", "fraud"],
+    "delisting":          ["delisted", "delisting", "removed from", "suspended trading", "trading suspended"],
+    "partnership":        ["partnership", "partners with", "integrates", "collaboration", "joins forces",
+                           "backed by", "investment from", "raises", "funding round", "series a", "series b"],
+    "regulation":         ["sec charges", "sec sues", "cftc", "doj charges", "arrested", "charged with",
+                           "banned", "crackdown", "regulatory", "compliance", "lawsuit"],
 }
 
 # RSS feeds de medios crypto
@@ -213,7 +228,8 @@ def is_high_impact(event_type: str) -> bool:
     high_impact = [
         "binance_listing", "coinbase_listing", "okx_listing", "bybit_listing",
         "strategic_alliance", "etf_filing", "etf_approval", "airdrop",
-        "token_burn", "token_unlock", "hack", "partnership", "exchange_listing"
+        "token_burn", "token_unlock", "hack", "partnership", "exchange_listing",
+        "regulation", "delisting"
     ]
     return event_type in high_impact
 
@@ -596,9 +612,14 @@ def get_exchange_symbols(exchange: str) -> set:
 
     try:
         r = requests.get(url, timeout=10, **kwargs)
-        return parser(r.json())
+        try:
+            data = r.json()
+        except Exception:
+            return set()  # JSON inválido, ignorar silenciosamente
+        return parser(data)
     except Exception as e:
-        log.warning(f"Error {exchange}: {e}")
+        if exchange != "bybit":  # bybit falla frecuentemente, no loguear
+            log.warning(f"Error {exchange}: {e}")
         return set()
 
 def check_new_listings() -> list:
@@ -732,6 +753,7 @@ def check_news_events() -> list:
 def check_telegram_channels() -> list:
     """Lee los últimos mensajes de WatcherGuru y whale_alert."""
     if not TELEGRAM_API_ID or not TELEGRAM_API_HASH or not TELEGRAM_SESSION:
+        log.warning("⚠️ Telethon: credenciales no configuradas (API_ID/API_HASH/SESSION)")
         return []
 
     alerts = []
@@ -739,10 +761,13 @@ def check_telegram_channels() -> list:
         from telethon.sync import TelegramClient
         from telethon.sessions import StringSession
 
+        log.info("📡 Conectando a canales Telegram...")
         with TelegramClient(StringSession(TELEGRAM_SESSION), TELEGRAM_API_ID, TELEGRAM_API_HASH) as client:
+            log.info("📡 Conexión Telethon OK")
             for channel in TELEGRAM_CHANNELS:
                 try:
-                    messages = client.get_messages(channel, limit=10)
+                    messages = client.get_messages(channel, limit=15)
+                    log.info(f"📡 Canal @{channel}: {len(messages)} mensajes obtenidos")
                     for msg in messages:
                         if not msg.text:
                             continue
@@ -782,9 +807,9 @@ def check_telegram_channels() -> list:
                 except Exception as e:
                     log.warning(f"Error leyendo canal {channel}: {e}")
     except ImportError:
-        log.warning("Telethon no instalado — canales Telegram desactivados")
+        log.error("❌ Telethon no instalado — verifica requirements.txt")
     except Exception as e:
-        log.error(f"Error Telethon: {e}")
+        log.error(f"❌ Error Telethon: {type(e).__name__}: {e}")
 
     return alerts
 
