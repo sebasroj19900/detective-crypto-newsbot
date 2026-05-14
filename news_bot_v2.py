@@ -27,9 +27,10 @@ import os
 import json
 import time
 import re
+import asyncio
 import requests
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from dotenv import load_dotenv
 import xml.etree.ElementTree as ET
@@ -41,8 +42,19 @@ load_dotenv()
 # ─────────────────────────────────────────────
 TELEGRAM_BOT_TOKEN  = os.getenv("TELEGRAM_BOT_TOKEN", "8298428814:AAHtYqO--Fo3GKJiP13u85uKLof4hQOSvT4")
 TELEGRAM_CHAT_ID    = os.getenv("TELEGRAM_CHAT_ID", "1190004564")
-COINGECKO_API_KEY   = os.getenv("COINGECKO_API_KEY", "")   # opcional, mejora rate limits
-CRYPTOPANIC_API_KEY = os.getenv("CRYPTOPANIC_API_KEY", "")  # opcional
+COINGECKO_API_KEY   = os.getenv("COINGECKO_API_KEY", "")
+CRYPTOPANIC_API_KEY = os.getenv("CRYPTOPANIC_API_KEY", "")
+
+# Credenciales Telethon para monitorear canales
+TELEGRAM_API_ID     = int(os.getenv("TELEGRAM_API_ID", "0"))
+TELEGRAM_API_HASH   = os.getenv("TELEGRAM_API_HASH", "")
+TELEGRAM_SESSION    = os.getenv("TELEGRAM_SESSION", "")
+
+# Canales de Telegram a monitorear
+TELEGRAM_CHANNELS = [
+    "WatcherGuru",    # Breaking news crypto
+    "whale_alert",    # Movimientos de ballenas
+]
 
 POLL_INTERVAL       = 600    # cada 10 minutos
 CACHE_FILE          = Path(__file__).parent / "cache_v2.json"
@@ -714,6 +726,69 @@ def check_news_events() -> list:
     return alerts
 
 # ─────────────────────────────────────────────
+#  MONITOR DE CANALES TELEGRAM
+# ─────────────────────────────────────────────
+
+def check_telegram_channels() -> list:
+    """Lee los últimos mensajes de WatcherGuru y whale_alert."""
+    if not TELEGRAM_API_ID or not TELEGRAM_API_HASH or not TELEGRAM_SESSION:
+        return []
+
+    alerts = []
+    try:
+        from telethon.sync import TelegramClient
+        from telethon.sessions import StringSession
+
+        with TelegramClient(StringSession(TELEGRAM_SESSION), TELEGRAM_API_ID, TELEGRAM_API_HASH) as client:
+            for channel in TELEGRAM_CHANNELS:
+                try:
+                    messages = client.get_messages(channel, limit=10)
+                    for msg in messages:
+                        if not msg.text:
+                            continue
+
+                        text = msg.text.strip()
+                        msg_id = f"tg_{channel}_{msg.id}"
+
+                        if msg_id in cache["seen_news"]:
+                            continue
+
+                        # Filtrar mensajes de más de 12 horas
+                        msg_time = msg.date.replace(tzinfo=timezone.utc)
+                        age_hours = (datetime.now(timezone.utc) - msg_time).total_seconds() / 3600
+                        if age_hours > 12:
+                            cache["seen_news"].append(msg_id)
+                            continue
+
+                        # Clasificar el mensaje
+                        event_type = classify_event(text)
+                        if not event_type or not is_high_impact(event_type):
+                            cache["seen_news"].append(msg_id)
+                            continue
+
+                        symbol = extract_token_symbol(text)
+                        title_es = translate_to_spanish(text[:200])
+                        cache["seen_news"].append(msg_id)
+
+                        log.info(f"📡 Canal [{channel}] [{event_type}]: {text[:70]}…")
+                        alerts.append({
+                            "symbol":     symbol,
+                            "event_type": event_type,
+                            "title":      title_es,
+                            "title_orig": text[:200],
+                            "link":       f"https://t.me/{channel}",
+                            "source":     f"Telegram @{channel}",
+                        })
+                except Exception as e:
+                    log.warning(f"Error leyendo canal {channel}: {e}")
+    except ImportError:
+        log.warning("Telethon no instalado — canales Telegram desactivados")
+    except Exception as e:
+        log.error(f"Error Telethon: {e}")
+
+    return alerts
+
+# ─────────────────────────────────────────────
 #  LOOP PRINCIPAL
 # ─────────────────────────────────────────────
 
@@ -758,6 +833,11 @@ def main():
             all_alerts += check_news_events()
         except Exception as e:
             log.error(f"Error noticias: {e}")
+
+        try:
+            all_alerts += check_telegram_channels()
+        except Exception as e:
+            log.error(f"Error canales Telegram: {e}")
 
         save_cache(cache)
 
