@@ -907,9 +907,11 @@ def main():
             symbol     = alert.get("symbol", "")
             event_type = alert.get("event_type", "")
             title      = alert.get("title", "")
+            title_orig = alert.get("title_orig", title)  # título original en inglés
             link       = alert.get("link", "")
 
-            inv_key = f"{symbol}_{event_type}_{title[:30]}"
+            # Dedup usando título original normalizado (evita duplicados entre RSS y Telegram)
+            inv_key = f"{symbol}_{event_type}_{title_orig[:50].lower().strip()}"
             if inv_key in cache["investigated"]:
                 continue
             cache["investigated"].append(inv_key)
