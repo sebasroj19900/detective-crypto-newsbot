@@ -310,6 +310,16 @@ def extract_token_symbol(title: str) -> str:
     return ""
 
 # ─────────────────────────────────────────────
+#  HELPERS DE FORMATO
+# ─────────────────────────────────────────────
+def fmt_usd(n: float) -> str:
+    """Formatea un valor numérico como USD legible."""
+    if n >= 1e9:  return f"${n/1e9:.2f}B"
+    if n >= 1e6:  return f"${n/1e6:.1f}M"
+    if n >= 1e3:  return f"${n/1e3:.1f}K"
+    return f"${n:.4f}"
+
+# ─────────────────────────────────────────────
 #  INVESTIGACIÓN DEL TOKEN
 # ─────────────────────────────────────────────
 
@@ -494,12 +504,6 @@ def investigate_token(symbol: str, event_type: str, news_title: str, news_link: 
         ath_p  = cg.get("ath_change_pct", 0)
         circ   = cg.get("circ_supply", 0)
         total  = cg.get("total_supply", 0)
-
-        def fmt_usd(n):
-            if n >= 1e9:  return f"${n/1e9:.2f}B"
-            if n >= 1e6:  return f"${n/1e6:.1f}M"
-            if n >= 1e3:  return f"${n/1e3:.1f}K"
-            return f"${n:.4f}"
 
         chg24_str = f"{'🟢' if chg24 >= 0 else '🔴'} {chg24:+.1f}%"
         chg7d_str = f"{'🟢' if chg7d >= 0 else '🔴'} {chg7d:+.1f}%"
@@ -706,6 +710,7 @@ def check_news_events() -> list:
             if guid in cache["seen_news"]:
                 continue
             if title_key in seen_titles_this_cycle:
+                cache["seen_news"].append(guid)  # marcar visto para no reprocesar en ciclos futuros
                 continue
 
             event_type = classify_event(title)
@@ -910,9 +915,12 @@ def main():
             title_orig = alert.get("title_orig", title)  # título original en inglés
             link       = alert.get("link", "")
 
-            # Dedup usando título original normalizado (evita duplicados entre RSS y Telegram)
-            inv_key = f"{symbol}_{event_type}_{title_orig[:50].lower().strip()}"
+            # Dedup por símbolo + tipo de evento + hora (evita duplicados entre fuentes distintas)
+            # Dos fuentes que cubren el mismo evento en la misma hora → una sola alerta
+            time_window = datetime.now().strftime("%Y-%m-%d-%H")
+            inv_key = f"{symbol}_{event_type}_{time_window}"
             if inv_key in cache["investigated"]:
+                log.info(f"⏭ Duplicado ignorado [{event_type}] {symbol} (ya enviado esta hora)")
                 continue
             cache["investigated"].append(inv_key)
 
